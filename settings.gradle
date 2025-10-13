@@ -1,0 +1,3 @@
+rootProject.name = "otto-crypt-java-android"
+include(":otto-crypt-java")
+include(":otto-crypt-android")

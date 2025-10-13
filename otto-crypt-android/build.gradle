@@ -1,0 +1,36 @@
+plugins {
+    id 'com.android.library'
+}
+
+group = "com.ivansostarko"
+version = "0.1.0"
+
+android {
+    namespace "com.ivansostarko.ottocrypt"
+    compileSdk 34
+    defaultConfig {
+        minSdk 24
+        targetSdk 34
+        consumerProguardFiles "consumer-rules.pro"
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    api project(":otto-crypt-java")
+    api 'com.goterl:lazysodium-android:5.1.0'
+}
