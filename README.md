@@ -1,95 +1,57 @@
-# OTTO Crypt — Java & Android
+# otto-crypt-android
 
-**Modules:**
-- `:otto-crypt-java` — pure Java library (JDK 11+)
-- `:otto-crypt-android` — Android wrapper depending on Java core + `lazysodium-android`
+Android library (Kotlin) implementing the **OTTO** encryption format — **wire-compatible with the Laravel/PHP SDK**.
 
-**License:** MIT  
-**Author:** Ivan Doe  
-**Interop:** ✅ Compatible with Laravel `ivansostarko/otto-crypt-php`, Node `otto-crypt-js`, Python `otto-crypt-py`, and .NET `IvanSostarko.OttoCrypt`
+- AES-256-GCM (tag 16B), AAD = OTTO header
+- HKDF-SHA256 per-object keys (`encKey`, `nonceKey`)
+- HKDF-SIV-style 12B nonces per chunk (`"OTTO-CHUNK-NONCE" || counter_be64`)
+- Streaming container for large files: `header || [u32_be ct_len || ct || tag16]*`
+- Optional X25519 helpers (API 28+)
 
-Implements **OTTO-256-GCM-HKDF-SIV** with **AES-256-GCM**, **HKDF(SHA-256)**, **Argon2id** (`crypto_pwhash`), and **X25519**. Supports **streaming** for large files and **E2E** sessions (ephemeral X25519).
+## Import
+Open the folder in **Android Studio** and include the module `:ottocrypt-android` in your app.
+Or publish the AAR from `:ottocrypt-android` and depend on it.
 
-> ⚠️ Custom composition. Get an **independent cryptographic review** before production use.
+## Usage
 
-## Install
+### Text
+```kotlin
+import com.ivansostarko.ottocrypt.android.Otto
+import java.security.SecureRandom
+import android.util.Base64
 
-### Java
-```gradle
-repositories { mavenCentral() }
-dependencies {
-    implementation("com.ivansostarko:otto-crypt-java:0.1.0") // when published
-    implementation("com.goterl:lazysodium-java:5.1.0")
-    implementation("net.java.dev.jna:jna:5.13.0")
-}
+val rawKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
+val enc = Otto.encryptString("Hello OTTO".toByteArray(), rawKey)
+val headerB64 = Base64.encodeToString(enc.header, Base64.NO_WRAP)
+val cipherB64 = Base64.encodeToString(enc.cipherAndTag, Base64.NO_WRAP)
+
+// later
+val header = Base64.decode(headerB64, Base64.NO_WRAP)
+val cipher = Base64.decode(cipherB64, Base64.NO_WRAP)
+val plain = Otto.decryptString(cipher, header, rawKey)
 ```
 
-### Android
-```gradle
-dependencies {
-    implementation(project(":otto-crypt-android"))        // if using this repo
-    implementation("com.goterl:lazysodium-android:5.1.0") // sodium JNI for Android
-}
+### Files (photo/audio/video/any)
+```kotlin
+val key = rawKey // 32B
+Otto.encryptFile(File("/sdcard/Download/movie.mp4"), File("/sdcard/Download/movie.mp4.otto"), key)
+Otto.decryptFile(File("/sdcard/Download/movie.mp4.otto"), File("/sdcard/Download/movie.dec.mp4"), key)
 ```
 
-## Usage (Java)
-
-```java
-import com.ivansostarko.ottocrypt.OttoCrypt;
-import com.ivansostarko.ottocrypt.OttoCrypt.Options;
-
-var o = new OttoCrypt();
-
-// Strings
-var opt = new Options(); opt.password = "P@ssw0rd!";
-var enc = o.encryptString("hello".getBytes(StandardCharsets.UTF_8), opt);
-var plain = o.decryptString(enc.cipherAndTag, enc.header, opt);
-
-// Files
-o.encryptFile("in.mp4", "in.mp4.otto", opt);
-o.decryptFile("in.mp4.otto", "in.dec.mp4", opt);
-
-// X25519 (E2E)
-var encOpt = new Options(); encOpt.recipientPublic = "<BASE64_OR_HEX_PUBLIC>";
-var decOpt = new Options(); decOpt.senderSecret = "<BASE64_OR_HEX_SECRET>";
-o.encryptFile("photo.jpg", "photo.jpg.otto", encOpt);
-o.decryptFile("photo.jpg.otto", "photo.jpg", decOpt);
+### Optional X25519 (API 28+)
+```kotlin
+val kp = Otto.x25519Generate() ?: error("X25519 requires API 28+")
+val session = Otto.hkdfSession(
+    shared = Otto.x25519Shared(kp.private, kp.public),
+    salt = "room-salt".toByteArray()
+)
 ```
 
-## Algorithm & Format
-
-**Header:**
-```
-OTTO1 | 0xA1 | kdf | flags | 0x00 | hlen(2) | file_salt(16) | (pw_salt+ops+memKiB | eph_pubkey)
-```
-**Chunks:** `[len(4-be)] [ciphertext] [tag(16)]`, **AD** = full header.
-
-**Keys & Nonces:**
-```
-enc_key   = HKDF(master, 32, "OTTO-ENC-KEY",  file_salt)
-nonce_key = HKDF(master, 32, "OTTO-NONCE-KEY", file_salt)
-nonce_i   = HKDF(nonce_key, 12, "OTTO-CHUNK-NONCE" || counter64be, "")
-```
-
-**Master key** from **Argon2id**, **raw 32-byte key**, or **X25519** ECDH (ephemeral sender public in header).
-
-## Interoperability
-
-Matches the Laravel/Node/Python/.NET OTTO implementations byte-for-byte: same header, AD, HKDF labels, deterministic nonce derivation, and streaming wire format.
-
-## Security Notes
-
-- AES-GCM (16B tag) with header-bound AD
-- Deterministic nonces mitigate nonce reuse errors
-- Strong passwords + Argon2id required; prefer E2E for messengers
-- JVM/Android memory may retain copies despite zeroing
-- Audit recommended
-
-## Build
-
-```bash
-./gradlew :otto-crypt-java:build
-./gradlew :otto-crypt-android:assembleRelease
-```
+## Interop (Laravel ↔ Android)
+- **Header**: `"OTTO1"|0xA1|0x02|flags|0x00|u16_be(16)|file_salt[16]`
+- **Keys**: `encKey = HKDF(rawKey, salt=file_salt, info="OTTO-ENC-KEY", 32)`; `nonceKey = HKDF(rawKey, salt=file_salt, info="OTTO-NONCE-KEY", 32)`
+- **Nonces**: `HKDF(nonceKey, salt="", info="OTTO-CHUNK-NONCE"||counter_be64, 12)`
+- **AEAD**: AES-256-GCM (tag 16B), AAD = header
+- **Container**: `header || [u32_be ct_len || ct || tag16]*`
 
 MIT © 2025 Ivan Doe

@@ -1,3 +1,2 @@
-rootProject.name = "otto-crypt-java-android"
-include(":otto-crypt-java")
-include(":otto-crypt-android")
+rootProject.name = "otto-crypt-android"
+include(":ottocrypt-android")
